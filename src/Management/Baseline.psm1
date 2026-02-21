@@ -8,6 +8,7 @@ function Test-NetworkBaseline {
 
     [CmdletBinding()]
     param (
+	[Parameter(Mandatory)]
 	[string]$ComputerName
 	)
 
