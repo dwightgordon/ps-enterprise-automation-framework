@@ -13,7 +13,7 @@ function Get-ScoreImpact {
     if ($IsCompliant) {
         return 0
     }
-    if (-not $Script:SeverityMap.contsinskey($Severity)) {
+    if (-not $Script:SeverityMap.ContainsKey($Severity)) {
         throw "Invalid severity value: $Severity"
     }
     return $Script:SeverityMap[$Severity]
