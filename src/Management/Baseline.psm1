@@ -7,7 +7,9 @@ Import-Module "$PSScriptRoot\..\Observability\Logging.psm1" -Force
 function Test-NetworkBaseline {
 
     [CmdletBinding()]
-    param ()
+    param (
+	[string]$ComputerName
+	)
 
     Initialize-Logger
     Write-Log -Message "Network baseline test started." -Level INFO -Component "Baseline"
