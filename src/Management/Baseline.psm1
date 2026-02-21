@@ -3,104 +3,83 @@
 # ============================================================
 
 Import-Module "$PSScriptRoot\..\Observability\Logging.psm1" -Force
+Import-Module "$PSScriptRoot\..\Governance\Compliance.psm1" -Force
 
 function Test-NetworkBaseline {
 
     [CmdletBinding()]
     param (
-	[Parameter(Mandatory)]
-	[string]$ComputerName
-	)
+        [Parameter(Mandatory)]
+        [string]$ComputerName
+    )
 
     Initialize-Logger
-    Write-Log -Message "Network baseline test started." -Level INFO -Component "Baseline"
+    Write-Log -Message "Network baseline test started for $ComputerName." -Level INFO -Component "Baseline"
+
+    $results = @()
 
     try {
 
-        $checks = @{
-            IPv6Disabled     = $false
-            CorrectDnsServer = $false
-            TimeSyncCorrect  = $false
-        }
-
-        # Check IPv6 binding
+        # =====================================================
+        # 1. IPv6 Disabled Check
+        # =====================================================
         $ipv6 = Get-NetAdapterBinding -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue
-        if ($ipv6 -and $ipv6.Enabled -eq $false) {
-            $checks.IPv6Disabled = $true
+        $ipv6Disabled = ($ipv6 -and $ipv6.Enabled -eq $false)
+
+        $results += [PSCustomObject]@{
+            ComputerName = $ComputerName
+            ControlName  = "IPv6Disabled"
+            Category     = "Network"
+            DesiredState = "Disabled"
+            ActualState  = if ($ipv6Disabled) { "Disabled" } else { "Enabled" }
+            IsCompliant  = $ipv6Disabled
+            Severity     = "Medium"
+            ScoreImpact  = Get-ScoreImpact -Severity "Medium" -IsCompliant $ipv6Disabled
+            Timestamp    = Get-Date
         }
 
-        # Check DNS server
-        $dns = (Get-DnsClientServerAddress -AddressFamily IPv4).ServerAddresses
-        if ($dns -contains "192.168.1.10") {
-            $checks.CorrectDnsServer = $true
+        # =====================================================
+        # 2. Correct DNS Server Check
+        # =====================================================
+        $dns = (Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses
+        $correctDns = ($dns -contains "192.168.1.10")
+
+        $results += [PSCustomObject]@{
+            ComputerName = $ComputerName
+            ControlName  = "CorrectDnsServer"
+            Category     = "Network"
+            DesiredState = "192.168.1.10"
+            ActualState  = ($dns -join ", ")
+            IsCompliant  = $correctDns
+            Severity     = "High"
+            ScoreImpact  = Get-ScoreImpact -Severity "High" -IsCompliant $correctDns
+            Timestamp    = Get-Date
         }
 
-        # Check time sync source
+        # =====================================================
+        # 3. Time Synchronization Check
+        # =====================================================
         $timeSource = (w32tm /query /status 2>$null | Select-String "Source").ToString()
-        if ($timeSource -match "DC01") {
-            $checks.TimeSyncCorrect = $true
+        $timeCorrect = ($timeSource -match "DC01")
+
+        $results += [PSCustomObject]@{
+            ComputerName = $ComputerName
+            ControlName  = "TimeSyncCorrect"
+            Category     = "Network"
+            DesiredState = "DC01"
+            ActualState  = $timeSource
+            IsCompliant  = $timeCorrect
+            Severity     = "High"
+            ScoreImpact  = Get-ScoreImpact -Severity "High" -IsCompliant $timeCorrect
+            Timestamp    = Get-Date
         }
 
-        # Compliance calculation
-        $totalChecks  = $checks.Count
-        $passedChecks = ($checks.Values | Where-Object { $_ -eq $true }).Count
-        $score        = [math]::Round(($passedChecks / $totalChecks) * 100)
+        Write-Log -Message "Network baseline evaluation completed for $ComputerName." -Level INFO -Component "Baseline"
 
-        # Governance classification
-        if ($score -eq 100) {
-            $status = "Compliant"
-        }
-        elseif ($score -ge 70) {
-            $status = "Partially Compliant"
-        }
-        else {
-            $status = "Non-Compliant"
-        }
-
-        Write-Log -Message "Baseline result: Score=$score Status=$status" -Level INFO -Component "Baseline"
-
-        return [PSCustomObject]@{
-            ComputerName     = $env:COMPUTERNAME
-            ComplianceScore  = "$score`%"
-            ComplianceStatus = $status
-            Details          = $checks
-            Timestamp        = Get-Date
-        }
+        return $results
     }
     catch {
         Write-Log -Message $_.Exception.Message -Level ERROR -Component "Baseline"
         throw
     }
 }
-
-function Invoke-NetworkRemediation {
-
-    [CmdletBinding(SupportsShouldProcess)]
-    param ()
-
-    Initialize-Logger
-    Write-Log -Message "Network remediation started." -Level WARN -Component "Baseline"
-
-    try {
-
-        if (Get-NetAdapterBinding -ComponentID ms_tcpip6 | Where-Object { $_.Enabled -eq $true }) {
-            Disable-NetAdapterBinding -Name "Ethernet" -ComponentID ms_tcpip6 -Confirm:$false
-        }
-
-        Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ServerAddresses "192.168.1.10"
-
-        w32tm /config /syncfromflags:domhier /update | Out-Null
-        Restart-Service w32time -Force
-
-        Write-Log -Message "Network remediation completed successfully." -Level INFO -Component "Baseline"
-
-        Write-Output "Remediation completed."
-    }
-    catch {
-        Write-Log -Message $_.Exception.Message -Level ERROR -Component "Baseline"
-        throw
-    }
-}
-
-Export-ModuleMember -Function Test-NetworkBaseline, Invoke-NetworkRemediation
-
